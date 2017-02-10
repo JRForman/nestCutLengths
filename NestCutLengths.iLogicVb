@@ -1,0 +1,416 @@
+﻿
+
+Public Sub Main
+Dim asmDoc As AssemblyDocument
+invApp = ThisApplication
+asmDoc = ThisApplication.ActiveDocument
+
+iLogicVb.RunExternalRule("PartQTY")
+
+Dim projectName As String
+projectName = iProperties.Value(ThisApplication.ActiveDocument, "Project", "Project")
+
+Dim currentPath As String
+currentPath = ThisDoc.Path
+			
+Dim currentDate As String
+currentDate = Now.ToString("yyyy.MM.dd")
+
+Dim refDocs As DocumentsEnumerator
+refDocs = asmDoc.AllReferencedDocuments
+
+
+'____________________________________________________________
+
+ExcelApp = CreateObject("Excel.Application")
+ExcelApp.Visible = True
+ExcelApp.DisplayAlerts = False
+ExcelWorkbook = ExcelApp.Workbooks.Open("R:\Engineering Files\Templates 2016\xxxx-S1 Cut List.xlsm")
+ExcelName = projectName & " Cut List " & currentDate & ".xlsm"
+excelFullFileName = currentPath & "\" & ExcelName
+ExcelWorkbook.SaveAs (excelFullFileName)
+ExcelWorkbook.Worksheets(01).Cells(8,5) = projectName
+'___________________________________________________________
+
+
+
+
+Dim partArraylist As ArrayList = New ArrayList()
+Dim materialArraylist As ArrayList = New ArrayList()
+Dim partProgress As ProgressBar
+	fileCount = RefDocs.Count()
+	partProgress = invApp.CreateProgressBar(False, filecount+1,"Creating cut sheets",False,)
+	partProgress.Message = "Analysing:"
+	'partProgress.UpdateProgress 
+	
+'partProgress.Message = "Analysisng " & partDoc.DisplayName
+
+'For Each partDoc in RefDocs
+
+'_____________________New way_______________________________
+Dim oBOM As BOM
+oBOM = ThisApplication.ActiveDocument.ComponentDefinition.BOM
+oAssy=ThisApplication.ActiveDocument
+Dim oBOMView As BOMView
+oBOM.PartsOnlyViewEnabled = True   
+oBOM.StructuredViewEnabled = True
+oBOMView = oBOM.BOMViews.Item("Parts Only")
+oBomSView=oBOM.BOMViews.Item("Structured")
+
+For i = 1 To oBOMView.BOMRows.Count
+
+	Dim partDoc As Document
+  	Dim oRow As BOMRow
+  	Dim oItemRow As BOMRow
+  	oRow = oBOMView.BOMRows(i)  
+	Dim oCompDef As ComponentDefinition
+  	oCompDef = oRow.ComponentDefinitions.Item(1)
+	partDoc = oCompDef.Document
+	Dim partFullDoc As String  = partDoc.FullDocumentName
+	
+ 	
+'___________________________________________________________
+
+	
+	Try
+	partProgress.Message = "Analysing:" & partDoc.DisplayName
+	partProgress.UpdateProgress 
+	Catch
+	End Try
+	
+	
+	Try
+	partFullName = partDoc.FullDocumentName
+	
+	partName = oCompDef.Document.PropertySets.Item("Design Tracking Properties").Item("Part Number").Value
+	'MsgBox (partName)
+	partMaterialOriginal = oCompDef.Document.PropertySets.Item("Design Tracking Properties").Item("Stock Number").Value
+	Catch
+	Continue For
+	End Try
+	
+	partMaterial  = System.Text.RegularExpressions.Regex.Replace(partMaterialOriginal, ChrW(&H02BA) , "_")
+	partMaterial  = System.Text.RegularExpressions.Regex.Replace(partMaterialOriginal, "/" , "_")
+	partMaterial = Left(partmaterial, 31)
+	
+	Try
+			'partOpp = iProperties.Value(partDoc.DisplayName, "Custom", "Operation")
+			'partQTY = iProperties.Value(partDoc.DisplayName, "Custom", "PartQTY")
+			partOpp = partDoc.PropertySets.Item("Inventor User Defined Properties").Item("Operation").Value
+			partQTY = partDoc.PropertySets.Item("Inventor User Defined Properties").Item("PartQTY").Value
+	Catch
+		partOpp = 0
+		partQTY = 0
+		partMaterial =0
+	End Try
+	
+	
+
+'Is it nested on the saw?
+	If Not UCase(partOpp) = "SAW" Then Continue For
+
+'Is there a material?
+	If partMaterial = "" Then Continue For
+	
+'Is there a quantity?
+	If partQTY = "" Or "0" Then Continue For
+	
+'Is it an inseparable assembly?
+	If partDoc.DocumentType = kAssemblyDocumentObject Then
+	assemDef = partDoc.ComponentDefinition
+	BOMStruc = assemDef.BOMStructure()
+		If BOMStruc = 51974 Then 
+		openDoc = ThisApplication.Documents.Open(partDoc.FullDocumentName, True)
+		AssemblyInseperable (X:=TotalLength)
+		'MsgBox("TotalLength: " & TotalLength)
+		
+		tangents = InputBox("This part: " & partName & " may require tangents to make" & vbCrLf & vbCrLf & _
+			"How much material would you like to add?(Total)" & vbCrLf & vbCrLf & "Part Length : " & Round(TotalLength,3) & _
+			" inches", "Sweep Detected, Tangents To Add.", "0",)
+			If tangents Is "" Then 
+				partProgress.Close
+				ExcelWorkbook.Close
+				openDoc.Close
+				Exit Sub
+			End If
+			TotalLength = Round(TotalLength + (tangents),3)
+			openDoc.Close
+		
+		
+		Goto Line1
+		End If
+		
+	End If
+'Is it a part Document?
+	If Not TypeOf partDoc Is PartDocument Then Continue For
+
+	
+	
+
+	Dim partDef As PartComponentDefinition
+		partDef = partDoc.ComponentDefinition
+		
+
+	
+'Is this a previously nested part?
+	If partArrayList.Contains(partName) Then Continue For
+		partArrayList.add(partName)	
+'Try for G_L value	
+	
+	Dim ptFeature As PartFeature
+
+	
+	For Each ptFeature In partDef.Features
+	countExtrude = ptFeature.Type
+	
+	If countExtrude = 83910656 Or countExtrude = 84014080 Or countExtrude = 83910912 Then
+	'Try
+	Dim partBox As Box
+	partBox = partDoc.ComponentDefinition.SurfaceBodies.Item(1).RangeBox
+	Dim maxZ As Double
+	Dim minZ As Double
+	'Dim length As Double
+	maxZ=(partBox.MaxPoint.Z)/2.54
+	minZ=(partBox.MinPoint.Z)/2.54
+	TotalLength = Round(maxZ - minZ, 3)
+	'Dim partParameters As Parameters
+	'partParameters = partDoc.ComponentDefinition.Parameters
+	
+	'partParameters.Item("G_L").Value = 2.54*TotalLength
+	'temp = partParameters.Item("G_L").Value / 2.54
+'	MsgBox(partDoc.FullDocumentName & " equals " & temp)
+
+	Goto Line1
+
+	
+	
+	'Catch
+'	MsgBox("Cannot determine a length for: " & partDoc.FullDocumentName)
+	'End Try
+	End If
+	Next
+
+'Check For Sweep
+
+
+
+	For Each ptFeature In partDef.Features
+		countsweeps = ptFeature.Type
+		item = ptFeature.Name
+
+
+		If countsweeps = 83916288 Then
+		
+'Handle Sweep Length
+		
+			Dim partSweep As SweepFeature
+				partSweep = partDef.Features(item)
+			Dim profileOrigin As Point2d
+				profileOrigin = partSweep.Profile.RegionProperties.Centroid
+	
+			Dim profileOrigin3D As Point
+				profileOrigin3D = partSweep.Profile.Parent.SketchToModelSpace(profileOrigin)
+		
+			Dim partCurves As ObjectsEnumerator
+				partCurves = partDef.Features.SweepFeatures.GetTruePath(partSweep.Path, profileOrigin3D)
+
+'	Dim TotalLength As Double
+    		TotalLength = 0
+    
+    		Dim partCurve As Object
+    		For Each partCurve In partCurves
+        
+        		Dim partCurveEval As CurveEvaluator
+         			partCurveEval = partCurve.Evaluator
+        
+        		Dim MinParam As Double
+        		Dim MaxParam As Double
+        		Dim Length As Double
+        
+        		Call partCurveEval.GetParamExtents(MinParam, MaxParam)
+        		Call partCurveEval.GetLengthAtParam(MinParam, MaxParam, Length)
+        
+        		TotalLength = TotalLength + Length
+    		Next
+    				
+					
+			openDoc = ThisApplication.Documents.Open(partDoc.FullDocumentName, True)
+	
+					
+    ' Display total sweep length
+    		tangents = InputBox("This part: " & partName & " may require tangents to make" & vbCrLf & vbCrLf & _
+			"How much material would you like to add?(Total)" & vbCrLf & vbCrLf & "Part Length : " & Round(TotalLength/2.54,3) & _
+			" inches", "Sweep Detected, Tangents To Add.", "0",)
+			If tangents Is "" Then 
+				partProgress.Close
+				ExcelWorkbook.Close
+				openDoc.Close
+				Exit Sub
+			End If
+			TotalLength = Round(TotalLength/2.54 + (tangents),3)
+			openDoc.Close
+	
+			Exit For
+
+		End If
+		
+	Next
+
+
+
+
+Line1:
+	
+
+
+
+
+	If Not materialArrayList.Contains(partMaterial) And partMaterial IsNot "" Then
+		materialArrayList.add(partMaterial)
+	
+	'Dim partMaterial.Name  As ArrayList = New ArrayList()
+	
+	ExcelWorkbook.Worksheets("01").Copy (before:=Excelworkbook.Worksheets(01))
+	ExcelWorkbook.Worksheets(01).Name = partMaterial
+	ExcelWorkbook.Worksheets(01).Cells(9,5) = partMaterial
+	
+	End If
+
+	Excelworkbook.Worksheets(partMaterial).Activate
+	materialRow = 13
+	Do While Excelworkbook.Worksheets(partMaterial).Cells(materialRow,3).Value IsNot Nothing
+	Excelworkbook.Worksheets(partMaterial).Cells(materialRow,3).Activate
+	materialRow = materialRow + 1
+	Loop
+
+	Excelworkbook.Worksheets(partMaterial).Cells(materialRow,3)=partName
+	Excelworkbook.Worksheets(partMaterial).Cells(materialRow,4)=TotalLength
+	Excelworkbook.Worksheets(partMaterial).Cells(materialRow,5)=partQTY
+
+
+Next
+
+ExcelWorkbook.Worksheets("01").Delete
+numberOfSheets=ExcelWorkbook.Worksheets.Count
+'Try
+
+	For x = 1 To numberOfSheets
+		Excelworkbook.Worksheets(x).Activate
+		ExcelApp.Run("SortEm")
+		ExcelApp.Run("Cutem")
+		ExcelApp.Run("Scissors")
+		ExcelWorkbook.Worksheets(x).Cells(13,3).Select
+	Next 
+		ExcelApp.Run("SortSheets")
+partProgress.Close
+ExcelApp.Visible = False
+seeIt = MsgBox("Do you wish to view the cutlist results?",4,"See the cutlist")
+ExcelWorkbook.Save
+If seeIt = MsgBoxResult.Yes Then
+	ExcelApp.Visible = True
+	ExcelWorkbook.Worksheets(01).Activate
+Else
+	ExcelWorkbook.Worksheets(01).Activate
+	Excelworkbook.Close
+End If
+	
+
+End Sub
+
+Public Sub AssemblyInseperable(ByRef X As Double)
+
+iLogicVb.RunExternalRule("PartQTY")
+asmDoc = ThisApplication.ActiveDocument
+
+asmDef = asmDoc.ComponentDefinition
+ThisApplication.ActiveView.GoHome
+
+
+Dim refDocs As DocumentsEnumerator
+refDocs = asmDoc.AllReferencedDocuments
+Dim partDoc As Document
+
+
+X=0
+For Each partDoc in RefDocs
+	partDef = partDoc.ComponentDefinition
+	Dim ptFeature As PartFeature
+	
+	For Each ptFeature In partDef.Features
+	countExtrude = ptFeature.Type
+	If countExtrude = 83910656 Or countExtrude = 84014080 Or countExtrude = 83910912 Then
+	
+	Dim partBox As Box
+	partBox = partDef.SurfaceBodies.Item(1).RangeBox
+	Dim maxZ As Double
+	Dim minZ As Double
+	
+	maxZ=(partBox.MaxPoint.Z)/2.54
+	minZ=(partBox.MinPoint.Z)/2.54
+	TotalLength = Round(maxZ - minZ, 3)
+	Dim partParameters As Parameters
+	partParameters = partDoc.ComponentDefinition.Parameters
+	
+	partParameters.Item("G_L").Value = 2.54*TotalLength
+	temp = partParameters.Item("G_L").Value / 2.54
+	X= X + TotalLength
+	Goto Line2
+	End If
+	
+	'Check For Sweep
+	
+	Next
+
+	For Each ptFeature In partDef.Features
+		countsweeps = ptFeature.Type
+		item = ptFeature.Name
+
+		
+		If countsweeps = 83916288 Then
+			TotalLength = 0
+			
+'Handle Sweep Length
+		
+			Dim partSweep As SweepFeature
+				partSweep = partDef.Features(item)
+			Dim profileOrigin As Point2d
+				profileOrigin = partSweep.Profile.RegionProperties.Centroid
+	
+			Dim profileOrigin3D As Point
+				profileOrigin3D = partSweep.Profile.Parent.SketchToModelSpace(profileOrigin)
+		
+			Dim partCurves As ObjectsEnumerator
+				partCurves = partDef.Features.SweepFeatures.GetTruePath(partSweep.Path, profileOrigin3D)
+
+	
+    		
+    
+    		Dim partCurve As Object
+    		For Each partCurve In partCurves
+        
+        		Dim partCurveEval As CurveEvaluator
+         			partCurveEval = partCurve.Evaluator
+       
+        		Dim MinParam As Double
+        		Dim MaxParam As Double
+        		Dim Length As Double
+        
+        		Call partCurveEval.GetParamExtents(MinParam, MaxParam)
+        		Call partCurveEval.GetLengthAtParam(MinParam, MaxParam, Length)
+        
+        		TotalLength = TotalLength + Length
+				
+    		Next
+			TotalLength = TotalLength/2.54
+			X = X + TotalLength
+		End If
+			
+	Next
+		Line2:
+Next
+
+
+'
+
+
+End Sub
